@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Menu Jajanan Afifah — Scan & Order</title>
+  <style>
+    /* Minimal, clean styling */
+    :root{--accent:#d94664;--muted:#666}
+    body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial;margin:0;background:#fafafa;color:#111}
+    .container{max-width:980px;margin:24px auto;padding:16px}
+    header{display:flex;gap:16px;align-items:center;margin-bottom:12px}
+    .brand{font-size:20px;font-weight:700}
+    .desc{color:var(--muted);font-size:13px}
+
+    .menu-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+    .card{background:white;border-radius:12px;padding:12px;box-shadow:0 6px 18px rgba(10,10,10,0.06)}
+    .item-photo{width:100%;height:140px;object-fit:cover;border-radius:8px;margin-bottom:8px;background:#eee;display:block}
+    .item-title{font-weight:700;margin:4px 0}
+    .item-desc{font-size:13px;color:var(--muted);margin:6px 0}
+    .price{font-weight:700;margin-top:6px}
+    .controls{display:flex;gap:8px;align-items:center;margin-top:8px}
+    button{background:var(--accent);color:white;border:0;padding:8px 10px;border-radius:8px;cursor:pointer}
+    .qty{display:inline-flex;align-items:center;gap:8px}
+    .qty button{background:#eee;color:#111;padding:6px;border-radius:6px}
+
+    .cart{position:fixed;right:18px;bottom:18px;background:var(--accent);color:white;padding:12px 14px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.12);cursor:pointer}
+    .cart-bubble{background:#fff;color:var(--accent);padding:2px 6px;border-radius:99px;margin-left:6px;font-weight:700}
+
+    /* modal */
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,0.4);display:none;align-items:center;justify-content:center;padding:16px}
+    .modal .sheet{background:white;width:100%;max-width:720px;border-radius:12px;padding:16px;max-height:90vh;overflow:auto}
+    .row{display:flex;gap:8px;align-items:center}
+    input,textarea,select{width:100%;padding:8px;border-radius:8px;border:1px solid #e6e6e6}
+    .muted{color:var(--muted);font-size:13px}
+
+    footer{margin-top:18px;color:var(--muted);font-size:13px;text-align:center}
+
+    @media (max-width:520px){.item-photo{height:110px}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand">Jajanan Afifah</div>
+      <div class="desc">Scan → Pilih → Pesan via WhatsApp</div>
+    </header>
+
+    <section id="menu" class="menu-grid"></section>
+
+    <footer>
+      Buka lewat QR/tautan di atas layar. Untuk mengganti nomor WA dan menu, lihat komentar di berkas HTML.
+    </footer>
+  </div>
+
+  <button id="openCart" class="cart">Keranjang <span id="cartCount" class="cart-bubble">0</span></button>
+
+  <div id="modal" class="modal" role="dialog" aria-hidden="true">
+    <div class="sheet">
+      <h3>Keranjang Pesanan</h3>
+      <div id="cartItems"></div>
+      <div style="margin-top:12px">
+        <label class="muted">Nomor Meja (opsional)</label>
+        <input id="tableNo" placeholder="Contoh: Meja 5 / Takeaway" />
+      </div>
+      <div style="margin-top:8px">
+        <label class="muted">Catatan untuk pesanan</label>
+        <textarea id="orderNote" rows="2" placeholder="Contoh: kurang pedas"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button id="sendWA">Pesan via WhatsApp</button>
+        <button id="closeModal" style="background:#eee;color:#111">Tutup</button>
+      </div>
+      <p class="muted" style="margin-top:8px">Pesan akan terbuka di WhatsApp. Pastikan nomor WhatsApp penjual sudah diset di variabel <code>SELLER_PHONE</code> dalam file ini.</p>
+    </div>
+  </div>
+
+  <script>
+  /*
+    INSTRUKSI PENTING (baca sebelum publish):
+    1) Ganti variabel SELLER_PHONE di bawah dengan nomor WhatsApp tujuan tanpa tanda + atau spasi.
+       Contoh: 6281234567890 (untuk Indonesia 08xx -> 628xx)
+    2) Untuk menyesuaikan menu, edit array `MENU_ITEMS`.
+    3) Upload file ini ke hosting (GitHub Pages / Netlify / Vercel) lalu buat QR code yang menunjuk ke URL file tersebut.
+    4) Jika file hanya dibuka lokal (file://), QR tidak akan mengarah ke perangkat lain. Gunakan hosting sederhana.
+  */
+
+  const SELLER_PHONE = "628111222333"; // <-- ganti nomor WhatsApp tujuan di sini (international, no +)
+
+  // Contoh menu - sesuaikan saja. Setiap item: id, name, price (number), desc, photo
+  const MENU_ITEMS = [
+    {id: 'nasi-ayam', name:'Nasi Ayam Geprek', price:18000, desc:'Ayam geprek pedas, nasi hangat', photo:''},
+    {id: 'mie-goreng', name:'Mie Goreng Spesial', price:15000, desc:'Mie goreng + topping telur', photo:''},
+    {id: 'es-teh', name:'Es Teh Manis', price:5000, desc:'Es teh manis segar', photo:''}
+  ];
+
+  // Simple utility: format currency IDR
+  function formatRupiah(n){ return 'Rp ' + n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
+
+  // Cart (in-memory)
+  const cart = {};
+
+  const menuDiv = document.getElementById('menu');
+  const cartCount = document.getElementById('cartCount');
+  const modal = document.getElementById('modal');
+  const cartItemsDiv = document.getElementById('cartItems');
+
+  // Render menu
+  function renderMenu(){
+    menuDiv.innerHTML = '';
+    MENU_ITEMS.forEach(item => {
+      const el = document.createElement('div'); el.className='card';
+      el.innerHTML = `
+        <img src="${item.photo || 'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=400 height=300><rect width=100% height=100% fill=%23eee/><text x=50% y=50% dominant-baseline=middle text-anchor=middle fill=%23999 font-size=20>${encodeURIComponent(item.name)}</text></svg>'}" alt="${item.name}" class="item-photo" />
+        <div class="item-title">${item.name}</div>
+        <div class="item-desc">${item.desc}</div>
+        <div class="price">${formatRupiah(item.price)}</div>
+        <div class="controls">
+          <div class="qty">
+            <button onclick="decr('${item.id}')">-</button>
+            <div id="q-${item.id}" style="min-width:22px;text-align:center">0</div>
+            <button onclick="incr('${item.id}')">+</button>
+          </div>
+          <button onclick="addToCart('${item.id}')">Tambah</button>
+        </div>
+      `;
+      menuDiv.appendChild(el);
+    });
+  }
+
+  function incr(id){ const el=document.getElementById('q-'+id); el.textContent = (parseInt(el.textContent||'0')+1).toString(); }
+  function decr(id){ const el=document.getElementById('q-'+id); const v=Math.max(0,parseInt(el.textContent||'0')-1); el.textContent=v; }
+
+  function addToCart(id){ const qty = parseInt(document.getElementById('q-'+id).textContent||'0'); if(!qty) return alert('Pilih jumlah terlebih dahulu');
+    const item = MENU_ITEMS.find(x=>x.id===id);
+    if(!cart[id]) cart[id] = {...item, qty}; else cart[id].qty += qty;
+    document.getElementById('q-'+id).textContent = '0';
+    updateCartCount();
+  }
+
+  function updateCartCount(){
+    const total = Object.values(cart).reduce((s,i)=>s+i.qty,0);
+    cartCount.textContent = total;
+  }
+
+  document.getElementById('openCart').addEventListener('click', ()=>{
+    showModal();
+  });
+  document.getElementById('closeModal').addEventListener('click', ()=>{ hideModal(); });
+
+  function showModal(){
+    renderCartItems(); modal.style.display='flex'; modal.setAttribute('aria-hidden','false');
+  }
+  function hideModal(){ modal.style.display='none'; modal.setAttribute('aria-hidden','true'); }
+
+  function renderCartItems(){
+    cartItemsDiv.innerHTML = '';
+    if(Object.keys(cart).length===0){ cartItemsDiv.innerHTML = '<p class="muted">Keranjang kosong</p>'; return; }
+    const table = document.createElement('div');
+    Object.values(cart).forEach(it => {
+      const row = document.createElement('div'); row.className='row';
+      row.style.margin='8px 0';
+      row.innerHTML = `<div style="flex:1"><strong>${it.name}</strong><div class="muted">${formatRupiah(it.price)} x ${it.qty}</div></div><div style="min-width:120px;text-align:right"><button onclick=decCart('${it.id}')>-</button> <button onclick=incCart('${it.id}')>+</button> <button onclick=removeCart('${it.id}') style="background:#f3f3f3;color:#111">Hapus</button></div>`;
+      table.appendChild(row);
+    });
+    // subtotal
+    const subtotal = Object.values(cart).reduce((s,i)=>s + i.price * i.qty,0);
+    const subRow = document.createElement('div'); subRow.style.marginTop='12px'; subRow.innerHTML = `<strong>Subtotal: ${formatRupiah(subtotal)}</strong>`;
+    cartItemsDiv.appendChild(table);
+    cartItemsDiv.appendChild(subRow);
+  }
+
+  function incCart(id){ cart[id].qty++; updateCartCount(); renderCartItems(); }
+  function decCart(id){ cart[id].qty = Math.max(0, cart[id].qty-1); if(cart[id].qty===0) delete cart[id]; updateCartCount(); renderCartItems(); }
+  function removeCart(id){ delete cart[id]; updateCartCount(); renderCartItems(); }
+
+  document.getElementById('sendWA').addEventListener('click', ()=>{
+    if(Object.keys(cart).length===0) return alert('Keranjang kosong');
+    const tableNo = document.getElementById('tableNo').value.trim();
+    const orderNote = document.getElementById('orderNote').value.trim();
+    // Build message
+    let msg = `Pesanan dari Jajanan Afifah%0A`;
+    Object.values(cart).forEach(it=>{
+      msg += `- ${it.name} x ${it.qty} = ${formatRupiah(it.price*it.qty)}%0A`;
+    });
+    const subtotal = Object.values(cart).reduce((s,i)=>s + i.price * i.qty,0);
+    msg += `%0ASubtotal: ${formatRupiah(subtotal)}%0A`;
+    if(tableNo) msg += `%0AMeja/Instruksi: ${encodeURIComponent(tableNo)}%0A`;
+    if(orderNote) msg += `%0ANote: ${encodeURIComponent(orderNote)}%0A`;
+
+    // wa.me link
+    const url = `https://wa.me/${SELLER_PHONE}?text=${msg}`;
+    window.open(url, '_blank');
+  });
+
+  // initial render
+  renderMenu();
+  </script>
+</body>
+</html>
